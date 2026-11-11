@@ -14,8 +14,6 @@ Peran:
 import hashlib
 import hmac
 import os
-import sqlite3  # hanya untuk membaca tk.db lama saat impor
-import tempfile
 from datetime import date
 
 import numpy as np
@@ -39,23 +37,11 @@ MENU_PERAN = {
     "guru": ["Perkembangan Anak"],
     "ortu": ["Portal Orang Tua"],
 }
-MENU_PERAN["admin"].append("Impor Data Lama")
 
 
 # ---------- Helper database (PostgreSQL) ----------
 register_adapter(np.int64, AsIs)
 register_adapter(np.int32, AsIs)
-
-TABEL_DATA = {  # tabel -> kolom (urutan untuk impor dari tk.db lama)
-    "siswa": ["id", "nama", "kelompok", "wali", "no_hp"],
-    "tagihan": ["id", "siswa_id", "jenis", "bulan", "jumlah", "tanggal"],
-    "pembayaran": ["id", "tagihan_id", "tanggal", "jumlah", "metode"],
-    "guru": ["id", "nama", "jabatan", "gaji_pokok", "tunjangan"],
-    "gaji": ["id", "guru_id", "bulan", "gaji_pokok", "tunjangan", "potongan", "bersih", "tanggal"],
-    "pengeluaran": ["id", "tanggal", "pos", "keterangan", "jumlah"],
-    "perkembangan": ["id", "siswa_id", "periode", "motorik", "bahasa", "sosial", "catatan"],
-}
-
 
 def db_url():
     try:
@@ -678,42 +664,6 @@ def hal_akun():
                 st.rerun()
 
 
-def hal_impor():
-    """Salin data dari tk.db (SQLite) lama ke database online. Sekali saja."""
-    wajib("admin")
-    st.header("Impor Data Lama")
-    st.write("Pindahkan data dari file **tk.db** lama ke database online. "
-             "Akun login tidak ikut dipindah (buat ulang di menu Kelola Akun).")
-    ada = sum(int(read(f"SELECT COUNT(*) n FROM {t}")["n"][0]) for t in TABEL_DATA)
-    if ada:
-        st.warning("Database online sudah berisi data, impor dinonaktifkan agar data tidak dobel.")
-        return
-    berkas = st.file_uploader("Pilih file tk.db", type=["db"])
-    if berkas and st.button("Impor sekarang"):
-        with tempfile.NamedTemporaryFile(suffix=".db") as tmp:
-            tmp.write(berkas.getvalue()); tmp.flush()
-            lite = sqlite3.connect(tmp.name)
-            try:
-                perintah, jumlah = [], {}
-                for tabel, kolom in TABEL_DATA.items():
-                    daftar = ", ".join(kolom)
-                    rows = lite.execute(f"SELECT {daftar} FROM {tabel}").fetchall()
-                    jumlah[tabel] = len(rows)
-                    isi = ", ".join(["?"] * len(kolom))
-                    for r in rows:
-                        perintah.append((f"INSERT INTO {tabel} ({daftar}) VALUES ({isi})", r))
-                for tabel in TABEL_DATA:  # sinkronkan penomoran otomatis
-                    perintah.append((f"SELECT setval(pg_get_serial_sequence('{tabel}','id'), "
-                                     f"GREATEST((SELECT COALESCE(MAX(id),1) FROM {tabel}),1))", ()))
-                transaksi(perintah)
-            except Exception as e:
-                st.error(f"Impor gagal, tidak ada data yang masuk: {e}")
-                return
-            finally:
-                lite.close()
-        st.success("Impor selesai: " + ", ".join(f"{t} {n}" for t, n in jumlah.items()))
-
-
 # ---------- Main ----------
 def main():
     st.set_page_config(page_title=f"SIA {NAMA_TK}", page_icon="🏫", layout="wide")
@@ -740,7 +690,6 @@ def main():
         "Portal Orang Tua": hal_portal,
         "Laporan Keuangan": hal_laporan,
         "Kelola Akun": hal_akun,
-        "Impor Data Lama": hal_impor,
     }
     menu = {nama: semua[nama] for nama in MENU_PERAN.get(peran(), [])}
 
